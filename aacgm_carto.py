@@ -182,12 +182,6 @@ class AxesAACGM(GeoAxes):
                                         bottom_bound,\
                                         left_bound\
                                         ] )
-
-        # bound_lim_arr.append( LineString(([-x1, y1], [x2, y2])) )# right
-        # bound_lim_arr.append( LineString(([x1, -y1], [x2, y2])) )#top
-        # bound_lim_arr.append( LineString(([x1, y1], [x2, -y2])) )# bottom
-        # bound_lim_arr.append( LineString(([x1, y1], [-x2, y2])) )# left
-        # plot_outline = MultiLineString( bound_lim_arr )
         # get the plot extent, we'll get an intersection
         # to locate the ticks!
         plot_extent = self.get_extent(cartopy.crs.Geodetic())
