@@ -2,7 +2,7 @@ import cartopy
 from cartopy.mpl.geoaxes import GeoAxes
 import aacgmv2
 import numpy
-from shapely.geometry import  MultiLineString, mapping, shape
+from shapely.geometry import  MultiLineString, mapping, LineString, Polygon
 from matplotlib.projections import register_projection
 import copy
 import datetime
@@ -13,62 +13,57 @@ class AxesAACGM(GeoAxes):
         
     def __init__(self, *args, **kwargs):
         if "map_projection" in kwargs:
-            map_projection=kwargs.pop("map_projection")
+            map_projection = kwargs.pop("map_projection")
         else:
             map_projection = cartopy.crs.NorthPolarStereo()
             print("map_projection keyword not set, setting it to cartopy.crs.NorthPolarStereo()")
+        # first check if datetime keyword is given!
+        # it should be since we need it for aacgm
+        if "plot_date" in kwargs:
+            self.plot_date = kwargs.pop("plot_date")
+        else:
+            raise TypeError("need to provide a date using 'plot_date' keyword for aacgmv2 plotting")
+        # Now work with the coords!
+        supported_coords = [ "geo", "aacgmv2", "aacgmv2_mlt" ]
+        if "coords" in kwargs:
+            self.coords = kwargs.pop("coords")
+            if self.coords not in supported_coords:
+                err_str = "coordinates not supported, choose from : "
+                for _n,_sc in enumerate(supported_coords):
+                    if _n + 1 != len(supported_coords):
+                        err_str += _sc + ", "
+                    else:
+                        err_str += _sc
+                raise TypeError(err_str)
+        else:
+            self.coords = "aacgmv2"
+            print("coords keyword not set, setting it to aacgmv2")
+        # finally, initialize te GeoAxes object
         GeoAxes.__init__(self, map_projection=map_projection,*args, **kwargs)
 
-    def overaly_coast_lakes(self, coords="aacgmv2", plot_date=None,\
-                  resolution='110m', color='black', **kwargs):
+    def overaly_coast_lakes(self, resolution='110m', color='black', **kwargs):
         """
         Overlay AACGM coastlines and lakes
         """
-        supported_coords = [ "geo", "aacgmv2", "aacgmv2_mlt" ]
-        if coords not in supported_coords:
-            print("coordinates not supported, choose from ", supported_coords)
-            return
-        if (coords != "geo") and (datetime == None):
-            print("Your need to set datetime keyword for plotting in AACGM")
-            return
-
         kwargs['edgecolor'] = color
         kwargs['facecolor'] = 'none'
         # overaly coastlines
         feature = cartopy.feature.NaturalEarthFeature('physical', 'coastline',
                                                       resolution, **kwargs)
-        self.add_feature( cartopy.feature.COASTLINE, coords=coords,\
-                                plot_date=plot_date, **kwargs )
-        self.add_feature( cartopy.feature.LAKES, coords=coords,\
-                                plot_date=plot_date, **kwargs )
+        self.add_feature( cartopy.feature.COASTLINE, **kwargs )
+        self.add_feature( cartopy.feature.LAKES, **kwargs )
         
-    def coastlines(self, coords="aacgmv2", plot_date=None,\
-                  resolution='110m', color='black', **kwargs):
-        supported_coords = [ "geo", "aacgmv2", "aacgmv2_mlt" ]
-        if coords not in supported_coords:
-            print("coordinates not supported, choose from ", supported_coords)
-            return
-        if (coords != "geo") and (datetime == None):
-            print("Your need to set datetime keyword for plotting in AACGM")
-            return
-        # actual details!
+    def coastlines(self,resolution='110m', color='black', **kwargs):
+        # details!
         kwargs['edgecolor'] = color
         kwargs['facecolor'] = 'none'
         feature = cartopy.feature.NaturalEarthFeature('physical', 'coastline',
                                                       resolution, **kwargs)
-        return self.add_feature(feature, coords=coords,\
-                                plot_date=plot_date, **kwargs)
+        return self.add_feature(feature, **kwargs)
         
-    def add_feature(self, feature, coords="aacgmv2", plot_date=None, **kwargs):
-        supported_coords = [ "geo", "aacgmv2", "aacgmv2_mlt" ]
-        if coords not in supported_coords:
-            print("coordinates not supported, choose from ", supported_coords)
-            return
-        if (coords != "geo") and (datetime == None):
-            print("Your need to set datetime keyword for plotting in AACGM")
-            return
-        aacgm_geom = self.get_aacgm_geom(feature, plot_date)
-        aacgm_feature = cartopy.feature.ShapelyFeature(aacgm_geom, cartopy.crs.PlateCarree(),\
+    def add_feature(self, feature, **kwargs):
+        aacgm_geom = self.get_aacgm_geom(feature)
+        aacgm_feature = cartopy.feature.ShapelyFeature(aacgm_geom, cartopy.crs.Geodetic(),\
                                                  **kwargs)
         # Now we'll set facecolor as None because aacgm doesn't close
         # continents near equator and it turns into a problem
@@ -79,7 +74,7 @@ class AxesAACGM(GeoAxes):
         kwargs['facecolor'] = "none"
         super().add_feature(aacgm_feature, **kwargs)
         
-    def get_aacgm_geom(self, feature, plot_date, out_height=300. ):
+    def get_aacgm_geom(self, feature, out_height=300. ):
         new_i = []
         # cartopy.feature.COASTLINE
         for _n,i in enumerate(feature.geometries()):
@@ -94,7 +89,7 @@ class AxesAACGM(GeoAxes):
                 else:
                     _loop_list = _list
                 for _ngc, _gc in enumerate(_loop_list):
-                    _mc = aacgmv2.get_aacgm_coord(_gc[1], _gc[0], out_height, plot_date)
+                    _mc = aacgmv2.get_aacgm_coord(_gc[1], _gc[0], out_height, self.plot_date)
                     if numpy.isnan(_mc[0]):
                         continue 
                     mlon_check_jump_list.append( _mc[1] )
@@ -129,6 +124,91 @@ class AxesAACGM(GeoAxes):
         aacgm_coast = MultiLineString( new_i )
         return aacgm_coast
 
+    def mark_latitudes(self, lat_arr, lon_location=45, **kwargs):
+        """
+        mark the latitudes
+        Write down the latitudes on the map for labeling!
+        we are using this because cartopy doesn't have a 
+        label by default for non-rectangular projections!
+        """
+        if isinstance(lat_arr, list):
+            lat_arr = numpy.array(lat_arr)
+        else:
+            if not isinstance(lat_arr, numpy.ndarray):
+                raise TypeError('lat_arr must either be a list or numpy array')
+        # make an array of lon_location
+        lon_location_arr = numpy.full( lat_arr.shape, lon_location )
+        proj_xyz = self.projection.transform_points(\
+                            cartopy.crs.Geodetic(),\
+                            lon_location_arr,\
+                            lat_arr
+                            )
+        # plot the lats now!
+        out_extent_lats = False
+        for _np,_pro in enumerate(proj_xyz[..., :2].tolist()):
+            # check if lats are out of extent! if so ignore them
+            lat_lim = self.get_extent(crs=cartopy.crs.Geodetic())[2::]
+            if (lat_arr[_np] >= min(lat_lim)) and (lat_arr[_np] <= max(lat_lim)):
+                self.text( _pro[0], _pro[1], str(lat_arr[_np]), **kwargs)
+            else:
+                out_extent_lats = True
+        if out_extent_lats:
+            print( "some lats were out of extent ignored them" )
+
+    def mark_longitudes(self, lon_arr, **kwargs):
+        """
+        mark the latitudes
+        Write down the latitudes on the map for labeling!
+        we are using this because cartopy doesn't have a 
+        label by default for non-rectangular projections!
+        """
+        if isinstance(lon_arr, list):
+            lon_arr = numpy.array(lon_arr)
+        else:
+            if not isinstance(lon_arr, numpy.ndarray):
+                raise TypeError('lat_arr must either be a list or numpy array')
+        # plot_outline = LineString(self.outline_patch.get_path().vertices.tolist())
+
+        [x1, y1], [x2, y2] = self.viewLim.get_points()
+
+        lsa = []
+
+        lsa.append( LineString(([-x1, y1], [x2, y2])) )
+        lsa.append( LineString(([x1, -y1], [x2, y2])) )
+        lsa.append( LineString(([x1, y1], [x2, -y2])) )
+        lsa.append( LineString(([x1, y1], [-x2, y2])) )
+        plot_outline = MultiLineString( lsa )
+
+
+        print("---------------------------------------------------------------------")
+        plot_extent = self.get_extent(cartopy.crs.Geodetic())
+        ticks = numpy.arange(-180,180,15)
+        # print(ticks)
+        # print(plot_extent)
+        ls_arr = []
+        line_constructor = lambda t, n, b: numpy.vstack((numpy.zeros(n) + t, numpy.linspace(b[2], b[3], n))).T
+        for t in ticks:
+            xy = line_constructor(t, 30, plot_extent)
+            # print(xy)
+            proj_xyz = self.projection.transform_points(cartopy.crs.PlateCarree(), xy[:, 0], xy[:, 1])
+            xyt = proj_xyz[..., :2]
+            ls = LineString(xyt.tolist())
+            locs = plot_outline.intersection(ls)
+            ls_arr.append(locs)
+            if not locs:
+                continue
+            print(locs)
+            print(locs.bounds[0],locs.bounds[1])#locs = axis.intersection(ls)
+            arr_loc = 0
+            self.text( locs.bounds[0],locs.bounds[1], str(t) )
+        # self.plot(*plot_outline.exterior.xy[0], *plot_outline.exterior.xy[1], color="r")
+#             print("------------")
+#             print(plot_outline)
+        print("---------------------------------------------------------------------")
+        return plot_outline, ls_arr, self.get_xlim(), self.viewLim.get_points(), locs
+
+
+
         
 # Now register the projection with matplotlib so the user can select
 # it.
@@ -138,19 +218,27 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import datetime
     import cartopy
+    import numpy
 
     plot_date = datetime.datetime(2015,1,1)
     fig = plt.figure()
-    ax = fig.add_subplot(projection='aacgmv2',map_projection = cartopy.crs.NorthPolarStereo())
+    ax = fig.add_subplot(
+                projection='aacgmv2',\
+                map_projection = cartopy.crs.NorthPolarStereo(),\
+                coords="aacgmv2", plot_date=plot_date
+                )
     # uncomment lines below to add coastlines and lakes individually
-    # ax.coastlines(coords="aacgmv2", plot_date=plot_date)
-    # ax.add_feature( cartopy.feature.LAKES, plot_date=plot_date )
+    # ax.coastlines()
+    # ax.add_feature( cartopy.feature.LAKES)
     # or add coastlines and lakes together!
-    ax.overaly_coast_lakes(coords="aacgmv2", plot_date=plot_date)
+    ax.overaly_coast_lakes()
     # plot set the map bounds
     ax.set_extent([-180, 180, 40, 90], crs=cartopy.crs.PlateCarree())
     # plot a random line!
-    ax.plot([-0.08, 132], [51.53, 43.17], transform=cartopy.crs.PlateCarree())
+    # ax.scatter(54, 60, transform=cartopy.crs.Geodetic())
+    ax.plot( [-175, 175], [60,60], transform=cartopy.crs.Geodetic() )
     # overaly gridlines!
     ax.gridlines(linewidth=0.5)
+    ax.mark_latitudes(numpy.arange(20,90,10), fontsize=10)
+    ax.mark_longitudes(numpy.arange(20,90,10), fontsize=10)
     plt.savefig( "test_plots/carto_test.png" )
