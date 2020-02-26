@@ -155,58 +155,78 @@ class AxesAACGM(GeoAxes):
         if out_extent_lats:
             print( "some lats were out of extent ignored them" )
 
-    def mark_longitudes(self, lon_arr, **kwargs):
+    def mark_longitudes(self, lon_arr=numpy.arange(-180,180,60), **kwargs):
         """
-        mark the latitudes
-        Write down the latitudes on the map for labeling!
+        mark the longitudes
+        Write down the longitudes on the map for labeling!
         we are using this because cartopy doesn't have a 
         label by default for non-rectangular projections!
+        This is also trickier compared to latitudes!
         """
         if isinstance(lon_arr, list):
             lon_arr = numpy.array(lon_arr)
         else:
             if not isinstance(lon_arr, numpy.ndarray):
                 raise TypeError('lat_arr must either be a list or numpy array')
-        # plot_outline = LineString(self.outline_patch.get_path().vertices.tolist())
 
+        # get the boundaries
         [x1, y1], [x2, y2] = self.viewLim.get_points()
+        bound_lim_arr = []
+        right_bound = LineString(([-x1, y1], [x2, y2]))
+        top_bound = LineString(([x1, -y1], [x2, y2]))
+        bottom_bound = LineString(([x1, y1], [x2, -y2]))
+        left_bound = LineString(([x1, y1], [-x2, y2]))
+        plot_outline = MultiLineString( [\
+                                        right_bound,\
+                                        top_bound,\
+                                        bottom_bound,\
+                                        left_bound\
+                                        ] )
 
-        lsa = []
-
-        lsa.append( LineString(([-x1, y1], [x2, y2])) )
-        lsa.append( LineString(([x1, -y1], [x2, y2])) )
-        lsa.append( LineString(([x1, y1], [x2, -y2])) )
-        lsa.append( LineString(([x1, y1], [-x2, y2])) )
-        plot_outline = MultiLineString( lsa )
-
-
-        print("---------------------------------------------------------------------")
+        # bound_lim_arr.append( LineString(([-x1, y1], [x2, y2])) )# right
+        # bound_lim_arr.append( LineString(([x1, -y1], [x2, y2])) )#top
+        # bound_lim_arr.append( LineString(([x1, y1], [x2, -y2])) )# bottom
+        # bound_lim_arr.append( LineString(([x1, y1], [-x2, y2])) )# left
+        # plot_outline = MultiLineString( bound_lim_arr )
+        # get the plot extent, we'll get an intersection
+        # to locate the ticks!
         plot_extent = self.get_extent(cartopy.crs.Geodetic())
-        ticks = numpy.arange(-180,180,15)
-        # print(ticks)
-        # print(plot_extent)
-        ls_arr = []
-        line_constructor = lambda t, n, b: numpy.vstack((numpy.zeros(n) + t, numpy.linspace(b[2], b[3], n))).T
-        for t in ticks:
+        line_constructor = lambda t, n, b: numpy.vstack(\
+                        (numpy.zeros(n) + t, numpy.linspace(b[2], b[3], n))\
+                        ).T
+        for t in lon_arr:
             xy = line_constructor(t, 30, plot_extent)
             # print(xy)
-            proj_xyz = self.projection.transform_points(cartopy.crs.PlateCarree(), xy[:, 0], xy[:, 1])
+            proj_xyz = self.projection.transform_points(\
+                            cartopy.crs.PlateCarree(), xy[:, 0], xy[:, 1]\
+                            )
             xyt = proj_xyz[..., :2]
             ls = LineString(xyt.tolist())
             locs = plot_outline.intersection(ls)
-            ls_arr.append(locs)
             if not locs:
                 continue
-            print(locs)
-            print(locs.bounds[0],locs.bounds[1])#locs = axis.intersection(ls)
-            arr_loc = 0
-            self.text( locs.bounds[0],locs.bounds[1], str(t) )
-        # self.plot(*plot_outline.exterior.xy[0], *plot_outline.exterior.xy[1], color="r")
-#             print("------------")
-#             print(plot_outline)
-        print("---------------------------------------------------------------------")
-        return plot_outline, ls_arr, self.get_xlim(), self.viewLim.get_points(), locs
-
+            # we need to get the alignment right
+            # so get the boundary closest to the label
+            # and plot it!
+            closest_bound =min( [\
+                            right_bound.distance(locs),\
+                            top_bound.distance(locs),\
+                            bottom_bound.distance(locs),\
+                            left_bound.distance(locs)\
+                            ] )
+            if closest_bound == right_bound.distance(locs):
+                ha = 'left'
+                va = 'top'
+            elif closest_bound == top_bound.distance(locs):
+                ha = 'left'
+                va = 'bottom'
+            elif closest_bound == bottom_bound.distance(locs):
+                ha = 'left'
+                va = 'top'
+            else:
+                ha = 'right'
+                va = 'top'
+            self.text( locs.bounds[0],locs.bounds[1], str(t), ha=ha, va=va)
 
 
         
@@ -240,5 +260,5 @@ if __name__ == "__main__":
     # overaly gridlines!
     ax.gridlines(linewidth=0.5)
     ax.mark_latitudes(numpy.arange(20,90,10), fontsize=10)
-    ax.mark_longitudes(numpy.arange(20,90,10), fontsize=10)
-    plt.savefig( "test_plots/carto_test.png" )
+    ax.mark_longitudes(fontsize=10)
+    plt.savefig("test_plots/carto_test.png")
