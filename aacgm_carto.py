@@ -39,7 +39,7 @@ class AxesAACGM(GeoAxes):
             self.coords = "aacgmv2"
             print("coords keyword not set, setting it to aacgmv2")
         # finally, initialize te GeoAxes object
-        GeoAxes.__init__(self, map_projection=map_projection,*args, **kwargs)
+        super().__init__(map_projection=map_projection,*args, **kwargs)
 
     def overaly_coast_lakes(self, resolution='110m', color='black', **kwargs):
         """
@@ -93,8 +93,13 @@ class AxesAACGM(GeoAxes):
                     if numpy.isnan(_mc[0]):
                         continue 
                     mlon_check_jump_list.append( _mc[1] )
-
-                    mag_list.append( (_mc[1], _mc[0]) )
+                    if self.coords == "aacgmv2":
+                        mag_list.append( (_mc[1], _mc[0]) )
+                    else:
+                        if _mc[2]*15. > 180.:
+                            mag_list.append( (_mc[2]*15.-360., _mc[0]) )
+                        else:
+                            mag_list.append( (_mc[2]*15., _mc[0]) )
                 # check for unwanted jumps
                 mlon_check_jump_list = numpy.array( mlon_check_jump_list )
 
@@ -121,6 +126,7 @@ class AxesAACGM(GeoAxes):
         #             print(split_mag_list)
                     if len(split_mag_list) > 1:
                         new_i.append( tuple(split_mag_list) )
+
         aacgm_coast = MultiLineString( new_i )
         return aacgm_coast
 
@@ -168,7 +174,6 @@ class AxesAACGM(GeoAxes):
         else:
             if not isinstance(lon_arr, numpy.ndarray):
                 raise TypeError('lat_arr must either be a list or numpy array')
-
         # get the boundaries
         [x1, y1], [x2, y2] = self.viewLim.get_points()
         bound_lim_arr = []
@@ -220,8 +225,11 @@ class AxesAACGM(GeoAxes):
             else:
                 ha = 'right'
                 va = 'top'
-            self.text( locs.bounds[0],locs.bounds[1], str(t), ha=ha, va=va)
-
+            if self.coords == "aacgmv2_mlt":
+                marker_text = str(int(t/15.))
+            else:
+                marker_text = str(t)
+            self.text( locs.bounds[0],locs.bounds[1], marker_text, ha=ha, va=va)
 
         
 # Now register the projection with matplotlib so the user can select
@@ -230,16 +238,18 @@ register_projection(AxesAACGM)
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
     import datetime
     import cartopy
+    from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
     import numpy
 
-    plot_date = datetime.datetime(2015,1,1)
+    plot_date = datetime.datetime(2015,1,1,4)
     fig = plt.figure()
     ax = fig.add_subplot(
                 projection='aacgmv2',\
                 map_projection = cartopy.crs.NorthPolarStereo(),\
-                coords="aacgmv2", plot_date=plot_date
+                coords="aacgmv2_mlt", plot_date=plot_date
                 )
     # uncomment lines below to add coastlines and lakes individually
     # ax.coastlines()
@@ -247,12 +257,22 @@ if __name__ == "__main__":
     # or add coastlines and lakes together!
     ax.overaly_coast_lakes()
     # plot set the map bounds
-    ax.set_extent([-180, 180, 40, 90], crs=cartopy.crs.PlateCarree())
+    ax.set_extent([-180, 180, 50, 90], crs=cartopy.crs.PlateCarree())
     # plot a random line!
     # ax.scatter(54, 60, transform=cartopy.crs.Geodetic())
     ax.plot( [-175, 175], [60,60], transform=cartopy.crs.Geodetic() )
     # overaly gridlines!
-    ax.gridlines(linewidth=0.5)
-    ax.mark_latitudes(numpy.arange(20,90,10), fontsize=10)
-    ax.mark_longitudes(fontsize=10)
+    # the example here is for plotting gridlines
+    plt_lons = numpy.arange( 0, 361, 30 )
+    mark_lons = numpy.arange( 0, 360, 30 )
+    plt_lats = numpy.arange(30,90,10)
+    gl = ax.gridlines(crs=cartopy.crs.Geodetic(), linewidth=0.5)
+    gl.xlocator = mticker.FixedLocator(plt_lons)
+    gl.ylocator = mticker.FixedLocator(plt_lats)
+    gl.xformatter = LONGITUDE_FORMATTER
+    gl.yformatter = LATITUDE_FORMATTER
+    gl.n_steps = 90
+    # mark the longitudes
+    ax.mark_latitudes(plt_lats, fontsize=10)
+    ax.mark_longitudes(lon_arr=mark_lons, fontsize=10)
     plt.savefig("test_plots/carto_test.png")
